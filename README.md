@@ -1,0 +1,289 @@
+# velobase-billing
+
+Official Velobase Billing SDK for Python.
+
+- Synchronous and asynchronous clients
+- Type-safe with Pydantic v2 models and `py.typed` support
+- Automatic retries with exponential backoff
+- Python 3.9+
+
+## Installation
+
+```bash
+pip install velobase-billing
+```
+
+## Quick Start
+
+```python
+from velobase_billing import Velobase
+
+vb = Velobase(api_key="vb_live_xxx")
+
+# 1. Deposit credits to a customer (creates the customer if new)
+deposit = vb.customers.deposit(customer_id="user_123", amount=1000)
+
+# 2. Check balance
+customer = vb.customers.get("user_123")
+print(customer.balance.available)  # 1000.0
+
+# 3. Freeze credits before doing work
+freeze = vb.billing.freeze(
+    customer_id="user_123",
+    amount=50,
+    business_id="job_abc",
+)
+
+# 4a. Job succeeded — consume (supports partial)
+consume = vb.billing.consume(
+    business_id="job_abc",
+    actual_amount=32,  # only charge 32, return 18
+)
+
+# 4b. Or if the job failed — unfreeze to return all
+unfreeze = vb.billing.unfreeze(business_id="job_abc")
+```
+
+## How It Works
+
+Velobase Billing uses a **freeze-then-consume** pattern to safely manage credits:
+
+```
+deposit -> freeze -> consume   (normal flow)
+                  -> unfreeze  (failure/cancellation)
+```
+
+1. **Deposit** — Add credits to a customer's account. Creates the customer automatically on first deposit.
+2. **Freeze** — Pre-authorize an amount before performing work. The frozen credits are deducted from `available` but not yet `used`. Each freeze is identified by a unique `business_id` you provide.
+3. **Consume** — After the work is done, settle the frozen amount. You can pass `actual_amount` to charge less than what was frozen; the difference is automatically returned.
+4. **Unfreeze** — If the work fails or is cancelled, release the full frozen amount back to the customer.
+
+All write operations are **idempotent** — repeating the same `business_id` (freeze/consume/unfreeze) or `idempotency_key` (deposit) returns the original result without double-charging.
+
+## Async Usage
+
+Every method is available in an async version via `AsyncVelobase`:
+
+```python
+from velobase_billing import AsyncVelobase
+
+async def main():
+    vb = AsyncVelobase(api_key="vb_live_xxx")
+
+    deposit = await vb.customers.deposit(customer_id="user_123", amount=1000)
+    customer = await vb.customers.get("user_123")
+    print(customer.balance.available)
+
+    await vb.close()
+```
+
+## Context Manager
+
+Both clients support context managers to ensure the underlying HTTP connection is closed:
+
+```python
+# Sync
+with Velobase(api_key="vb_live_xxx") as vb:
+    customer = vb.customers.get("user_123")
+
+# Async
+async with AsyncVelobase(api_key="vb_live_xxx") as vb:
+    customer = await vb.customers.get("user_123")
+```
+
+## Configuration
+
+```python
+vb = Velobase(
+    api_key="vb_live_xxx",               # Required. Your Velobase API key.
+    base_url="https://api.velobase.io",   # Optional. Override the API endpoint.
+    timeout=30.0,                         # Optional. Request timeout in seconds (default: 30).
+    max_retries=2,                        # Optional. Retry count on 5xx/network errors (default: 2).
+)
+```
+
+## Usage Examples
+
+### Deposit with idempotency
+
+```python
+# Safe to retry — the second call returns the same result without double-charging
+result = vb.customers.deposit(
+    customer_id="user_123",
+    amount=500,
+    idempotency_key="order_abc_payment",
+    description="Purchase of 500 credits",
+)
+
+print(result.added_amount)         # 500.0
+print(result.is_idempotent_replay) # False on first call, True on retries
+```
+
+### Deposit with customer metadata
+
+```python
+result = vb.customers.deposit(
+    customer_id="user_123",
+    amount=1000,
+    name="Alice",
+    email="alice@example.com",
+    metadata={"plan": "pro", "source": "stripe"},
+)
+```
+
+### Full billing flow
+
+```python
+CUSTOMER = "user_123"
+JOB_ID = "video_gen_001"
+
+# Check balance before starting
+before = vb.customers.get(CUSTOMER)
+print(f"Available: {before.balance.available}")
+
+# Freeze the estimated cost
+vb.billing.freeze(
+    customer_id=CUSTOMER,
+    amount=100,
+    business_id=JOB_ID,
+    business_type="video_generation",
+    description="1080p video, ~60s",
+)
+
+# ... do the work ...
+
+# Settle with the actual cost (partial consumption)
+result = vb.billing.consume(
+    business_id=JOB_ID,
+    actual_amount=73,
+)
+print(f"Charged: {result.consumed_amount}")   # 73.0
+print(f"Returned: {result.returned_amount}")  # 27.0
+
+# Verify final balance
+after = vb.customers.get(CUSTOMER)
+print(f"Available: {after.balance.available}")
+```
+
+### Customer balance structure
+
+```python
+customer = vb.customers.get("user_123")
+
+# Aggregate balance across all accounts
+customer.balance.total      # total deposited
+customer.balance.used       # total consumed
+customer.balance.frozen     # currently frozen (pending)
+customer.balance.available  # total - used - frozen
+
+# Individual accounts (e.g., different credit types/expiry)
+for account in customer.accounts:
+    print(account.account_type)      # "CREDIT"
+    print(account.sub_account_type)  # "DEFAULT"
+    print(account.available)
+    print(account.expires_at)        # None or ISO date string
+```
+
+## API Reference
+
+### `vb.customers.deposit(...) -> DepositResponse`
+
+Deposit credits. Creates the customer if they don't exist.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `customer_id` | `str` | Yes | Your unique customer identifier |
+| `amount` | `float` | Yes | Amount to deposit (must be > 0) |
+| `idempotency_key` | `str` | No | Prevents duplicate deposits on retry |
+| `name` | `str` | No | Customer display name |
+| `email` | `str` | No | Customer email |
+| `metadata` | `dict` | No | Arbitrary key-value metadata |
+| `description` | `str` | No | Description for the deposit |
+
+**Returns:** `DepositResponse` with fields `customer_id`, `account_id`, `total_amount`, `added_amount`, `record_id`, `is_idempotent_replay`
+
+### `vb.customers.get(customer_id) -> CustomerResponse`
+
+Retrieve a customer's balance and account details.
+
+**Returns:** `CustomerResponse` with fields `id`, `name`, `email`, `metadata`, `balance`, `accounts`, `created_at`
+
+### `vb.billing.freeze(...) -> FreezeResponse`
+
+Freeze credits before performing work.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `customer_id` | `str` | Yes | Customer identifier |
+| `amount` | `float` | Yes | Amount to freeze (must be > 0) |
+| `business_id` | `str` | Yes | Your unique ID for this operation (idempotency key) |
+| `business_type` | `str` | No | Category label (e.g., `"video_generation"`) |
+| `description` | `str` | No | Human-readable description |
+
+**Returns:** `FreezeResponse` with fields `business_id`, `frozen_amount`, `freeze_details`, `is_idempotent_replay`
+
+### `vb.billing.consume(...) -> ConsumeResponse`
+
+Settle a frozen amount. Supports partial consumption.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `business_id` | `str` | Yes | The `business_id` from the freeze |
+| `actual_amount` | `float` | No | Actual amount to charge. Defaults to full frozen amount. |
+
+**Returns:** `ConsumeResponse` with fields `business_id`, `consumed_amount`, `returned_amount`, `consume_details`, `consumed_at`, `is_idempotent_replay`
+
+### `vb.billing.unfreeze(...) -> UnfreezeResponse`
+
+Release a frozen amount back to the customer.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `business_id` | `str` | Yes | The `business_id` from the freeze |
+
+**Returns:** `UnfreezeResponse` with fields `business_id`, `unfrozen_amount`, `unfreeze_details`, `unfrozen_at`, `is_idempotent_replay`
+
+## Error Handling
+
+All API errors raise typed exceptions that inherit from `VelobaseError`:
+
+```python
+from velobase_billing import VelobaseError, ValidationError, AuthenticationError, NotFoundError
+
+try:
+    vb.billing.freeze(
+        customer_id="user_123",
+        amount=999999,
+        business_id="job_xyz",
+    )
+except ValidationError as e:
+    # 400 — bad request or insufficient balance
+    print(e.message)  # "insufficient balance"
+except AuthenticationError as e:
+    # 401 — invalid or missing API key
+    pass
+except NotFoundError as e:
+    # 404 — customer not found
+    pass
+except VelobaseError as e:
+    # catch-all for other API errors
+    print(e.status, e.type, e.message)
+```
+
+| Exception | HTTP Status | When |
+|---|---|---|
+| `AuthenticationError` | 401 | Invalid or missing API key |
+| `ValidationError` | 400 | Bad params, insufficient balance |
+| `NotFoundError` | 404 | Customer or resource not found |
+| `ConflictError` | 409 | Conflicting operation |
+| `InternalError` | 500 | Server-side error (auto-retried) |
+
+## Retries
+
+The SDK automatically retries on 5xx errors and network failures with exponential backoff (0.5s, 1s, 2s..., capped at 5s). Retries are safe because all Velobase write operations are idempotent.
+
+4xx errors (validation, auth, not found) are never retried.
+
+## License
+
+MIT
