@@ -36,7 +36,7 @@ Repository = "https://github.com/velobase/velobase-billing-python"
 path = "src/velobase_billing/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-include = ["src/velobase_billing", "README.md"]
+packages = ["src/velobase_billing"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/", "README.md", "LICENSE", "pyproject.toml"]
