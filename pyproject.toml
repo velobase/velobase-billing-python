@@ -31,3 +31,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/velobase/velobase-billing-python"
 Repository = "https://github.com/velobase/velobase-billing-python"
+
+[tool.hatch.build.targets.wheel]
+include = ["src/velobase_billing", "README.md"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "README.md", "LICENSE", "pyproject.toml"]
