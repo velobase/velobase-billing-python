@@ -1,3 +1,5 @@
+__version__ = "0.1.1"
+
 from ._client import AsyncVelobase, Velobase
 from ._errors import (
     AuthenticationError,

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "velobase-billing"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Velobase Billing SDK for Python"
 readme = "README.md"
 license = "MIT"
@@ -31,6 +31,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/velobase/velobase-billing-python"
 Repository = "https://github.com/velobase/velobase-billing-python"
+
+[tool.hatch.version]
+path = "src/velobase_billing/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 include = ["src/velobase_billing", "README.md"]
