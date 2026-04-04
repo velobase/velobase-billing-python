@@ -1,9 +1,31 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from .._http import AsyncHttpClient, SyncHttpClient
 from .._types import ConsumeResponse, FreezeResponse, UnfreezeResponse
+
+BusinessType = Literal[
+    "UNDEFINED",
+    "TASK",
+    "ORDER",
+    "MEMBERSHIP",
+    "SUBSCRIPTION",
+    "FREE_TRIAL",
+    "ADMIN_GRANT",
+]
+
+_VALID_BUSINESS_TYPES = frozenset(
+    {"UNDEFINED", "TASK", "ORDER", "MEMBERSHIP", "SUBSCRIPTION", "FREE_TRIAL", "ADMIN_GRANT"}
+)
+
+
+def _validate_business_type(value: str) -> None:
+    if value not in _VALID_BUSINESS_TYPES:
+        valid = ", ".join(sorted(_VALID_BUSINESS_TYPES))
+        raise ValueError(
+            f"Invalid business_type: {value!r}. Must be one of: {valid}."
+        )
 
 
 class BillingResource:
@@ -16,9 +38,12 @@ class BillingResource:
         customer_id: str,
         amount: float,
         business_id: str,
-        business_type: Optional[str] = None,
+        business_type: Optional[BusinessType] = None,
         description: Optional[str] = None,
     ) -> FreezeResponse:
+        if business_type is not None:
+            _validate_business_type(business_type)
+
         body: Dict[str, Any] = {
             "customer_id": customer_id,
             "amount": amount,
@@ -61,9 +86,12 @@ class AsyncBillingResource:
         customer_id: str,
         amount: float,
         business_id: str,
-        business_type: Optional[str] = None,
+        business_type: Optional[BusinessType] = None,
         description: Optional[str] = None,
     ) -> FreezeResponse:
+        if business_type is not None:
+            _validate_business_type(business_type)
+
         body: Dict[str, Any] = {
             "customer_id": customer_id,
             "amount": amount,

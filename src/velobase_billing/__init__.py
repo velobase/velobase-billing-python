@@ -9,6 +9,7 @@ from ._errors import (
     ValidationError,
     VelobaseError,
 )
+from ._resources.billing import BusinessType
 from ._types import (
     ConsumeResponse,
     CustomerAccount,
@@ -28,6 +29,7 @@ __all__ = [
     "NotFoundError",
     "ConflictError",
     "InternalError",
+    "BusinessType",
     "FreezeResponse",
     "ConsumeResponse",
     "UnfreezeResponse",

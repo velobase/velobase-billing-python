@@ -150,7 +150,7 @@ vb.billing.freeze(
     customer_id=CUSTOMER,
     amount=100,
     business_id=JOB_ID,
-    business_type="video_generation",
+    business_type="TASK",
     description="1080p video, ~60s",
 )
 
@@ -221,7 +221,7 @@ Freeze credits before performing work.
 | `customer_id` | `str` | Yes | Customer identifier |
 | `amount` | `float` | Yes | Amount to freeze (must be > 0) |
 | `business_id` | `str` | Yes | Your unique ID for this operation (idempotency key) |
-| `business_type` | `str` | No | Category label (e.g., `"video_generation"`) |
+| `business_type` | `BusinessType` | No | Business category. See [business_type](#business_type) for accepted values. |
 | `description` | `str` | No | Human-readable description |
 
 **Returns:** `FreezeResponse` with fields `business_id`, `frozen_amount`, `freeze_details`, `is_idempotent_replay`
@@ -283,6 +283,42 @@ business_id = db.get_or_create_business_id(operation_id, customer_id)
 vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
 # Safe to retry — same business_id returns the original result
 vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
+```
+
+## business_type
+
+`business_type` is an optional parameter on `freeze()` that categorises the billing operation for analytics and reconciliation. The SDK validates the value client-side and raises `ValueError` before sending any network request.
+
+**Accepted values:**
+
+| Value | Description |
+|---|---|
+| `"UNDEFINED"` | Default / unclassified (server default when omitted) |
+| `"TASK"` | Async task execution (e.g. video generation, image processing) |
+| `"ORDER"` | One-time purchase or order fulfilment |
+| `"MEMBERSHIP"` | Membership plan credit grant |
+| `"SUBSCRIPTION"` | Subscription renewal credit grant |
+| `"FREE_TRIAL"` | Free-trial credit grant |
+| `"ADMIN_GRANT"` | Manually granted credits by an admin |
+
+```python
+from velobase_billing import Velobase, BusinessType
+
+vb = Velobase(api_key="vb_live_xxx")
+
+vb.billing.freeze(
+    customer_id="user_123",
+    amount=50,
+    business_id="job_abc",
+    business_type="TASK",         # ✅ IDE autocomplete + client-side validation
+)
+
+vb.billing.freeze(
+    customer_id="user_123",
+    amount=50,
+    business_id="job_abc",
+    business_type="INVALID_VAL",  # ❌ raises ValueError before making a network call
+)
 ```
 
 ## Error Handling
