@@ -16,6 +16,7 @@ pip install velobase-billing
 ## Quick Start
 
 ```python
+import uuid
 from velobase_billing import Velobase
 
 vb = Velobase(api_key="vb_live_xxx")
@@ -27,21 +28,24 @@ deposit = vb.customers.deposit(customer_id="user_123", amount=1000)
 customer = vb.customers.get("user_123")
 print(customer.balance.available)  # 1000.0
 
-# 3. Freeze credits before doing work
+# 3. Generate business_id once and persist before freezing
+business_id = f"user_123_{uuid.uuid4().hex}"
+
+# 4. Freeze credits before doing work
 freeze = vb.billing.freeze(
     customer_id="user_123",
     amount=50,
-    business_id="job_abc",
+    business_id=business_id,
 )
 
-# 4a. Job succeeded — consume (supports partial)
+# 5a. Job succeeded — consume (supports partial)
 consume = vb.billing.consume(
-    business_id="job_abc",
+    business_id=business_id,
     actual_amount=32,  # only charge 32, return 18
 )
 
-# 4b. Or if the job failed — unfreeze to return all
-unfreeze = vb.billing.unfreeze(business_id="job_abc")
+# 5b. Or if the job failed — unfreeze to return all
+unfreeze = vb.billing.unfreeze(business_id=business_id)
 ```
 
 ## How It Works
@@ -242,6 +246,44 @@ Release a frozen amount back to the customer.
 | `business_id` | `str` | Yes | The `business_id` from the freeze |
 
 **Returns:** `UnfreezeResponse` with fields `business_id`, `unfrozen_amount`, `unfreeze_details`, `unfrozen_at`, `is_idempotent_replay`
+
+## `business_id`
+
+`business_id` uniquely identifies one freeze → consume/unfreeze cycle and acts as its idempotency key. The server uses it to prevent double-charging on retries.
+
+**Recommended format: `{customer_id}_{uuid}`**
+
+```python
+import uuid
+
+# Generate once per billing operation, then persist it
+business_id = f"{customer_id}_{uuid.uuid4().hex}"
+# e.g. "user_123_a3f8c21d4e0b4a9f8c1d2e3f4a5b6c7d"
+```
+
+**Rules:**
+
+- **Generate once and store** — create the UUID before calling `freeze()`, save it to your database, and reuse the same value on retries
+- **Never regenerate at the call site** — calling `uuid.uuid4()` inside `freeze()` produces a different ID on every attempt, breaking idempotency
+- **Unique within your project** — two different billing operations must not share the same `business_id`
+
+```python
+# Wrong — new UUID on every call, idempotency broken on retry
+vb.billing.freeze(
+    customer_id=customer_id,
+    amount=50,
+    business_id=f"{customer_id}_{uuid.uuid4().hex}",  # ❌ regenerated each time
+)
+
+# Correct — UUID generated once and persisted before calling freeze
+business_id = db.get_or_create_business_id(operation_id, customer_id)
+# e.g. db.get_or_create_business_id returns an existing ID or
+#      stores f"{customer_id}_{uuid.uuid4().hex}" on first call
+
+vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
+# Safe to retry — same business_id returns the original result
+vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
+```
 
 ## Error Handling
 
