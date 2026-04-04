@@ -1,4 +1,4 @@
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 from ._client import AsyncVelobase, Velobase
 from ._errors import (
