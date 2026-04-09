@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 
 class FreezeResponse(BaseModel):
-    business_id: str
+    transaction_id: str
     frozen_amount: float
     freeze_details: List[Any]
     is_idempotent_replay: bool
@@ -19,7 +19,7 @@ class FreezeResponse(BaseModel):
 
 
 class ConsumeResponse(BaseModel):
-    business_id: str
+    transaction_id: str
     consumed_amount: float
     returned_amount: Optional[float] = None
     consume_details: List[Any]
@@ -31,7 +31,7 @@ class ConsumeResponse(BaseModel):
 
 
 class UnfreezeResponse(BaseModel):
-    business_id: str
+    transaction_id: str
     unfrozen_amount: float
     unfreeze_details: List[Any]
     unfrozen_at: str
@@ -44,9 +44,23 @@ class UnfreezeResponse(BaseModel):
 class DepositResponse(BaseModel):
     customer_id: str
     account_id: str
+    credit_type: Optional[str] = None
     total_amount: float
     added_amount: float
+    starts_at: Optional[str] = None
+    expires_at: Optional[str] = None
     record_id: str
+    is_idempotent_replay: bool
+
+
+# ─── Deduct ───────────────────────────────────────────────────────
+
+
+class DeductResponse(BaseModel):
+    transaction_id: str
+    deducted_amount: float
+    deduct_details: List[Any]
+    deducted_at: str
     is_idempotent_replay: bool
 
 
@@ -62,7 +76,7 @@ class CustomerBalance(BaseModel):
 
 class CustomerAccount(BaseModel):
     account_type: str
-    sub_account_type: str
+    credit_type: str
     total: float
     used: float
     frozen: float

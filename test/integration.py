@@ -81,7 +81,7 @@ def main() -> None:
     print("  1.3 Random string → 401")
     try:
         Velobase(api_key="garbage", base_url=BASE_URL).billing.freeze(
-            customer_id="x", amount=1, business_id="b"
+            customer_id="x", amount=1, transaction_id="b"
         )
         ok(False, "should have thrown")
     except AuthenticationError as e:
@@ -125,7 +125,7 @@ def main() -> None:
     ok(c1.balance.available == 1000, "available=1000")
     ok(len(c1.accounts) >= 1, "has accounts")
     ok(c1.accounts[0].account_type == "CREDIT", "account_type=CREDIT")
-    ok(c1.accounts[0].sub_account_type == "DEFAULT", "sub_account_type=DEFAULT")
+    ok(c1.accounts[0].credit_type == "default", "credit_type=default")
     ok(isinstance(c1.created_at, str), "has created_at")
     print(f"      OK: total={c1.balance.total} available={c1.balance.available}")
 
@@ -149,14 +149,14 @@ def main() -> None:
     print("══════════════════════════════════")
 
     print("\n  3.1 Freeze 600")
-    biz1 = f"{RUN}_biz1"
+    txn1 = f"{RUN}_txn1"
     f1 = vb.billing.freeze(
         customer_id=CUSTOMER,
         amount=600,
-        business_id=biz1,
+        transaction_id=txn1,
         description="Video generation job",
     )
-    ok(f1.business_id == biz1, "business_id matches")
+    ok(f1.transaction_id == txn1, "transaction_id matches")
     ok(f1.frozen_amount == 600, "frozen_amount=600")
     ok(f1.is_idempotent_replay is False, "not replay")
     ok(isinstance(f1.freeze_details, list) and len(f1.freeze_details) > 0, "has freeze_details")
@@ -168,14 +168,14 @@ def main() -> None:
     ok(c2.balance.available == 900, "available=900")
     print(f"      OK: frozen={c2.balance.frozen} available={c2.balance.available}")
 
-    print("  3.3 Idempotent freeze (same business_id)")
-    f1b = vb.billing.freeze(customer_id=CUSTOMER, amount=600, business_id=biz1)
+    print("  3.3 Idempotent freeze (same transaction_id)")
+    f1b = vb.billing.freeze(customer_id=CUSTOMER, amount=600, transaction_id=txn1)
     ok(f1b.is_idempotent_replay is True, "is replay")
     print(f"      OK: is_idempotent_replay={f1b.is_idempotent_replay}")
 
     print("  3.4 Partial consume: 400 of 600 frozen")
-    co1 = vb.billing.consume(business_id=biz1, actual_amount=400)
-    ok(co1.business_id == biz1, "business_id matches")
+    co1 = vb.billing.consume(transaction_id=txn1, actual_amount=400)
+    ok(co1.transaction_id == txn1, "transaction_id matches")
     ok(co1.consumed_amount == 400, "consumed_amount=400")
     ok(co1.returned_amount == 200, "returned_amount=200")
     ok(co1.is_idempotent_replay is False, "not replay")
@@ -195,13 +195,13 @@ def main() -> None:
     )
 
     print("  3.6 Freeze 300 → Unfreeze (full return)")
-    biz2 = f"{RUN}_biz2"
-    vb.billing.freeze(customer_id=CUSTOMER, amount=300, business_id=biz2)
+    txn2 = f"{RUN}_txn2"
+    vb.billing.freeze(customer_id=CUSTOMER, amount=300, transaction_id=txn2)
     c4 = vb.customers.get(CUSTOMER)
     ok(c4.balance.frozen == 300, "frozen=300 after freeze")
     ok(c4.balance.available == 800, "available=800 after freeze")
-    uf1 = vb.billing.unfreeze(business_id=biz2)
-    ok(uf1.business_id == biz2, "business_id matches")
+    uf1 = vb.billing.unfreeze(transaction_id=txn2)
+    ok(uf1.transaction_id == txn2, "transaction_id matches")
     ok(uf1.unfrozen_amount == 300, "unfrozen_amount=300")
     ok(uf1.is_idempotent_replay is False, "not replay")
     ok(isinstance(uf1.unfrozen_at, str), "has unfrozen_at")
@@ -215,9 +215,9 @@ def main() -> None:
     )
 
     print("  3.7 Full consume (no actual_amount)")
-    biz3 = f"{RUN}_biz3"
-    vb.billing.freeze(customer_id=CUSTOMER, amount=200, business_id=biz3)
-    co2 = vb.billing.consume(business_id=biz3)
+    txn3 = f"{RUN}_txn3"
+    vb.billing.freeze(customer_id=CUSTOMER, amount=200, transaction_id=txn3)
+    co2 = vb.billing.consume(transaction_id=txn3)
     ok(co2.consumed_amount == 200, "consumed_amount=200")
     ok(co2.returned_amount is None or co2.returned_amount == 0, "returned=None|0")
     c6 = vb.customers.get(CUSTOMER)
@@ -228,6 +228,52 @@ def main() -> None:
         f"→ available={c6.balance.available}"
     )
 
+    # ===================== 3B. DEDUCT FLOW =====================
+    print("\n══════════════════════════════════")
+    print(" 3B. DEDUCT FLOW")
+    print("══════════════════════════════════")
+
+    print("\n  3B.1 Direct deduct 50")
+    txn_d1 = f"{RUN}_deduct1"
+    dd1 = vb.billing.deduct(
+        customer_id=CUSTOMER,
+        amount=50,
+        transaction_id=txn_d1,
+        business_type="TASK",
+        description="API call charge",
+    )
+    ok(dd1.transaction_id == txn_d1, "transaction_id matches")
+    ok(dd1.deducted_amount == 50, "deducted_amount=50")
+    ok(dd1.is_idempotent_replay is False, "not replay")
+    ok(isinstance(dd1.deducted_at, str), "has deducted_at")
+    ok(isinstance(dd1.deduct_details, list) and len(dd1.deduct_details) > 0, "has deduct_details")
+    print(f"      OK: deducted={dd1.deducted_amount}")
+
+    print("  3B.2 Balance after deduct")
+    c7 = vb.customers.get(CUSTOMER)
+    ok(c7.balance.used == 650, "used=650")
+    ok(c7.balance.available == 850, "available=850")
+    print(f"      OK: used={c7.balance.used} available={c7.balance.available}")
+
+    print("  3B.3 Idempotent deduct (same transaction_id)")
+    dd1b = vb.billing.deduct(
+        customer_id=CUSTOMER, amount=50, transaction_id=txn_d1
+    )
+    ok(dd1b.is_idempotent_replay is True, "is replay")
+    c7b = vb.customers.get(CUSTOMER)
+    ok(c7b.balance.available == 850, "available still 850")
+    print(f"      OK: replay={dd1b.is_idempotent_replay} available={c7b.balance.available}")
+
+    print("  3B.4 Deduct insufficient balance")
+    try:
+        vb.billing.deduct(
+            customer_id=CUSTOMER, amount=999999, transaction_id=f"{RUN}_deduct_fail"
+        )
+        ok(False, "should throw")
+    except ValidationError as e:
+        ok(e.status == 400, "status=400")
+        print(f'      OK: ValidationError "{e.message}"')
+
     # ===================== 4. ERROR HANDLING =====================
     print("\n══════════════════════════════════")
     print(" 4. ERROR HANDLING")
@@ -236,16 +282,16 @@ def main() -> None:
     print("\n  4.1 Insufficient balance")
     try:
         vb.billing.freeze(
-            customer_id=CUSTOMER, amount=999999, business_id=f"{RUN}_fail1"
+            customer_id=CUSTOMER, amount=999999, transaction_id=f"{RUN}_fail1"
         )
         ok(False, "should throw")
     except ValidationError as e:
         ok(e.status == 400, "status=400")
         print(f'      OK: ValidationError "{e.message}"')
 
-    print("  4.2 Consume non-existent business_id")
+    print("  4.2 Consume non-existent transaction_id")
     try:
-        vb.billing.consume(business_id="nonexistent_biz_id")
+        vb.billing.consume(transaction_id="nonexistent_txn_id")
         ok(False, "should throw")
     except VelobaseError as e:
         ok(e.status >= 400, "status>=400")
@@ -269,15 +315,15 @@ def main() -> None:
 
     print("  4.5 Freeze with empty customer_id")
     try:
-        vb.billing.freeze(customer_id="", amount=100, business_id="x")
+        vb.billing.freeze(customer_id="", amount=100, transaction_id="x")
         ok(False, "should throw")
     except ValidationError as e:
         ok(e.status == 400, "status=400")
         print(f'      OK: ValidationError "{e.message}"')
 
-    print("  4.6 Unfreeze non-existent business_id")
+    print("  4.6 Unfreeze non-existent transaction_id")
     try:
-        vb.billing.unfreeze(business_id="nonexistent_biz_id")
+        vb.billing.unfreeze(transaction_id="nonexistent_txn_id")
         ok(False, "should throw")
     except VelobaseError as e:
         ok(e.status >= 400, "status>=400")
@@ -303,11 +349,11 @@ def main() -> None:
         print(f"      OK: available={c.balance.available}")
 
         print("  5.3 Async freeze → consume")
-        biz = f"{RUN}_async_biz"
+        txn = f"{RUN}_async_txn"
         await avb.billing.freeze(
-            customer_id=ASYNC_CUSTOMER, amount=50, business_id=biz
+            customer_id=ASYNC_CUSTOMER, amount=50, transaction_id=txn
         )
-        co = await avb.billing.consume(business_id=biz, actual_amount=30)
+        co = await avb.billing.consume(transaction_id=txn, actual_amount=30)
         ok(co.consumed_amount == 30, "consumed=30")
         print(f"      OK: consumed={co.consumed_amount}")
 
@@ -329,7 +375,7 @@ def main() -> None:
     print("\n  6.1 with Velobase(...) as client:")
     with Velobase(api_key=API_KEY, base_url=BASE_URL) as client:
         c = client.customers.get(CUSTOMER)
-        ok(c.balance.available == 900, "available=900")
+        ok(c.balance.available == 850, "available=850")
         print(f"      OK: available={c.balance.available}")
 
     # ===================== SUMMARY =====================

@@ -16,6 +16,9 @@ class CustomersResource:
         *,
         customer_id: str,
         amount: float,
+        credit_type: Optional[str] = None,
+        starts_at: Optional[str] = None,
+        expires_at: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         name: Optional[str] = None,
         email: Optional[str] = None,
@@ -26,6 +29,12 @@ class CustomersResource:
             "customer_id": customer_id,
             "amount": amount,
         }
+        if credit_type is not None:
+            body["credit_type"] = credit_type
+        if starts_at is not None:
+            body["starts_at"] = starts_at
+        if expires_at is not None:
+            body["expires_at"] = expires_at
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
         if name is not None:
@@ -62,6 +71,9 @@ class AsyncCustomersResource:
         *,
         customer_id: str,
         amount: float,
+        credit_type: Optional[str] = None,
+        starts_at: Optional[str] = None,
+        expires_at: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         name: Optional[str] = None,
         email: Optional[str] = None,
@@ -72,6 +84,12 @@ class AsyncCustomersResource:
             "customer_id": customer_id,
             "amount": amount,
         }
+        if credit_type is not None:
+            body["credit_type"] = credit_type
+        if starts_at is not None:
+            body["starts_at"] = starts_at
+        if expires_at is not None:
+            body["expires_at"] = expires_at
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
         if name is not None:

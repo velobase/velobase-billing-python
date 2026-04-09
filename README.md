@@ -28,24 +28,24 @@ deposit = vb.customers.deposit(customer_id="user_123", amount=1000)
 customer = vb.customers.get("user_123")
 print(customer.balance.available)  # 1000.0
 
-# 3. Generate business_id once and persist before freezing
-business_id = f"user_123_{uuid.uuid4().hex}"
+# 3. Generate transaction_id once and persist before freezing
+transaction_id = f"user_123_{uuid.uuid4().hex}"
 
 # 4. Freeze credits before doing work
 freeze = vb.billing.freeze(
     customer_id="user_123",
     amount=50,
-    business_id=business_id,
+    transaction_id=transaction_id,
 )
 
 # 5a. Job succeeded — consume (supports partial)
 consume = vb.billing.consume(
-    business_id=business_id,
+    transaction_id=transaction_id,
     actual_amount=32,  # only charge 32, return 18
 )
 
 # 5b. Or if the job failed — unfreeze to return all
-unfreeze = vb.billing.unfreeze(business_id=business_id)
+unfreeze = vb.billing.unfreeze(transaction_id=transaction_id)
 ```
 
 ## How It Works
@@ -57,12 +57,19 @@ deposit -> freeze -> consume   (normal flow)
                   -> unfreeze  (failure/cancellation)
 ```
 
-1. **Deposit** — Add credits to a customer's account. Creates the customer automatically on first deposit.
-2. **Freeze** — Pre-authorize an amount before performing work. The frozen credits are deducted from `available` but not yet `used`. Each freeze is identified by a unique `business_id` you provide.
+It also supports a **direct deduct** pattern for immediate deduction without freezing:
+
+```
+deposit -> deduct  (immediate deduction)
+```
+
+1. **Deposit** — Add credits to a customer's account. Creates the customer automatically on first deposit. Supports `credit_type` to specify the credit category, and `starts_at`/`expires_at` for time-limited credits.
+2. **Freeze** — Pre-authorize an amount before performing work. The frozen credits are deducted from `available` but not yet `used`. Each freeze is identified by a unique `transaction_id` you provide. Supports `credit_types` to freeze from specific credit categories.
 3. **Consume** — After the work is done, settle the frozen amount. You can pass `actual_amount` to charge less than what was frozen; the difference is automatically returned.
 4. **Unfreeze** — If the work fails or is cancelled, release the full frozen amount back to the customer.
+5. **Deduct** — Directly deduct credits from a customer without freezing first. Useful for immediate charges. Supports `credit_types` to deduct from specific credit categories.
 
-All write operations are **idempotent** — repeating the same `business_id` (freeze/consume/unfreeze) or `idempotency_key` (deposit) returns the original result without double-charging.
+All write operations are **idempotent** — repeating the same `transaction_id` (freeze/consume/unfreeze/deduct) or `idempotency_key` (deposit) returns the original result without double-charging.
 
 ## Async Usage
 
@@ -123,6 +130,22 @@ print(result.added_amount)         # 500.0
 print(result.is_idempotent_replay) # False on first call, True on retries
 ```
 
+### Deposit with credit type and expiry
+
+```python
+result = vb.customers.deposit(
+    customer_id="user_123",
+    amount=1000,
+    credit_type="BONUS",
+    starts_at="2025-01-01T00:00:00Z",
+    expires_at="2025-12-31T23:59:59Z",
+    description="Annual bonus credits",
+)
+print(result.credit_type)   # "BONUS"
+print(result.starts_at)     # "2025-01-01T00:00:00.000Z"
+print(result.expires_at)    # "2025-12-31T23:59:59.000Z"
+```
+
 ### Deposit with customer metadata
 
 ```python
@@ -135,7 +158,7 @@ result = vb.customers.deposit(
 )
 ```
 
-### Full billing flow
+### Full billing flow (freeze-then-consume)
 
 ```python
 CUSTOMER = "user_123"
@@ -149,7 +172,7 @@ print(f"Available: {before.balance.available}")
 vb.billing.freeze(
     customer_id=CUSTOMER,
     amount=100,
-    business_id=JOB_ID,
+    transaction_id=JOB_ID,
     business_type="TASK",
     description="1080p video, ~60s",
 )
@@ -158,7 +181,7 @@ vb.billing.freeze(
 
 # Settle with the actual cost (partial consumption)
 result = vb.billing.consume(
-    business_id=JOB_ID,
+    transaction_id=JOB_ID,
     actual_amount=73,
 )
 print(f"Charged: {result.consumed_amount}")   # 73.0
@@ -167,6 +190,35 @@ print(f"Returned: {result.returned_amount}")  # 27.0
 # Verify final balance
 after = vb.customers.get(CUSTOMER)
 print(f"Available: {after.balance.available}")
+```
+
+### Direct deduct (without freezing)
+
+```python
+CUSTOMER = "user_123"
+TXN_ID = "api_call_001"
+
+result = vb.billing.deduct(
+    customer_id=CUSTOMER,
+    amount=5,
+    transaction_id=TXN_ID,
+    business_type="TASK",
+    description="API call charge",
+)
+print(f"Deducted: {result.deducted_amount}")  # 5.0
+print(f"At: {result.deducted_at}")
+```
+
+### Freeze with credit_types filter
+
+```python
+# Only freeze from specific credit categories
+freeze = vb.billing.freeze(
+    customer_id="user_123",
+    amount=50,
+    transaction_id="job_abc",
+    credit_types=["BONUS", "DEFAULT"],
+)
 ```
 
 ### Customer balance structure
@@ -182,10 +234,11 @@ customer.balance.available  # total - used - frozen
 
 # Individual accounts (e.g., different credit types/expiry)
 for account in customer.accounts:
-    print(account.account_type)      # "CREDIT"
-    print(account.sub_account_type)  # "DEFAULT"
+    print(account.account_type)  # "CREDIT"
+    print(account.credit_type)   # "DEFAULT", "BONUS", etc.
     print(account.available)
-    print(account.expires_at)        # None or ISO date string
+    print(account.starts_at)     # None or ISO date string
+    print(account.expires_at)    # None or ISO date string
 ```
 
 ## API Reference
@@ -198,13 +251,16 @@ Deposit credits. Creates the customer if they don't exist.
 |---|---|---|---|
 | `customer_id` | `str` | Yes | Your unique customer identifier |
 | `amount` | `float` | Yes | Amount to deposit (must be > 0) |
+| `credit_type` | `str` | No | Credit category (e.g. "DEFAULT", "BONUS"). Defaults to "DEFAULT" on server. |
+| `starts_at` | `str` | No | ISO datetime string. When the credits become active. |
+| `expires_at` | `str` | No | ISO datetime string. When the credits expire. Must be after `starts_at`. |
 | `idempotency_key` | `str` | No | Prevents duplicate deposits on retry |
 | `name` | `str` | No | Customer display name |
 | `email` | `str` | No | Customer email |
 | `metadata` | `dict` | No | Arbitrary key-value metadata |
 | `description` | `str` | No | Description for the deposit |
 
-**Returns:** `DepositResponse` with fields `customer_id`, `account_id`, `total_amount`, `added_amount`, `record_id`, `is_idempotent_replay`
+**Returns:** `DepositResponse` with fields `customer_id`, `account_id`, `credit_type`, `total_amount`, `added_amount`, `starts_at`, `expires_at`, `record_id`, `is_idempotent_replay`
 
 ### `vb.customers.get(customer_id) -> CustomerResponse`
 
@@ -220,11 +276,12 @@ Freeze credits before performing work.
 |---|---|---|---|
 | `customer_id` | `str` | Yes | Customer identifier |
 | `amount` | `float` | Yes | Amount to freeze (must be > 0) |
-| `business_id` | `str` | Yes | Your unique ID for this operation (idempotency key) |
+| `transaction_id` | `str` | Yes | Your unique ID for this operation (idempotency key) |
+| `credit_types` | `list[str]` | No | Restrict freeze to specific credit categories |
 | `business_type` | `BusinessType` | No | Business category. See [business_type](#business_type) for accepted values. |
 | `description` | `str` | No | Human-readable description |
 
-**Returns:** `FreezeResponse` with fields `business_id`, `frozen_amount`, `freeze_details`, `is_idempotent_replay`
+**Returns:** `FreezeResponse` with fields `transaction_id`, `frozen_amount`, `freeze_details`, `is_idempotent_replay`
 
 ### `vb.billing.consume(...) -> ConsumeResponse`
 
@@ -232,10 +289,10 @@ Settle a frozen amount. Supports partial consumption.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `business_id` | `str` | Yes | The `business_id` from the freeze |
+| `transaction_id` | `str` | Yes | The `transaction_id` from the freeze |
 | `actual_amount` | `float` | No | Actual amount to charge. Defaults to full frozen amount. |
 
-**Returns:** `ConsumeResponse` with fields `business_id`, `consumed_amount`, `returned_amount`, `consume_details`, `consumed_at`, `is_idempotent_replay`
+**Returns:** `ConsumeResponse` with fields `transaction_id`, `consumed_amount`, `returned_amount`, `consume_details`, `consumed_at`, `is_idempotent_replay`
 
 ### `vb.billing.unfreeze(...) -> UnfreezeResponse`
 
@@ -243,13 +300,28 @@ Release a frozen amount back to the customer.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `business_id` | `str` | Yes | The `business_id` from the freeze |
+| `transaction_id` | `str` | Yes | The `transaction_id` from the freeze |
 
-**Returns:** `UnfreezeResponse` with fields `business_id`, `unfrozen_amount`, `unfreeze_details`, `unfrozen_at`, `is_idempotent_replay`
+**Returns:** `UnfreezeResponse` with fields `transaction_id`, `unfrozen_amount`, `unfreeze_details`, `unfrozen_at`, `is_idempotent_replay`
 
-## `business_id`
+### `vb.billing.deduct(...) -> DeductResponse`
 
-`business_id` uniquely identifies one freeze → consume/unfreeze cycle and acts as its idempotency key. The server uses it to prevent double-charging on retries.
+Directly deduct credits without freezing first. Useful for immediate charges.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `customer_id` | `str` | Yes | Customer identifier |
+| `amount` | `float` | Yes | Amount to deduct (must be > 0) |
+| `transaction_id` | `str` | Yes | Your unique ID for this operation (idempotency key) |
+| `credit_types` | `list[str]` | No | Restrict deduction to specific credit categories |
+| `business_type` | `BusinessType` | No | Business category. See [business_type](#business_type) for accepted values. |
+| `description` | `str` | No | Human-readable description |
+
+**Returns:** `DeductResponse` with fields `transaction_id`, `deducted_amount`, `deduct_details`, `deducted_at`, `is_idempotent_replay`
+
+## `transaction_id`
+
+`transaction_id` uniquely identifies one billing operation (freeze → consume/unfreeze cycle, or a single deduct) and acts as its idempotency key. The server uses it to prevent double-charging on retries.
 
 **Recommended format: `{customer_id}_{uuid}`**
 
@@ -257,37 +329,37 @@ Release a frozen amount back to the customer.
 import uuid
 
 # Generate once per billing operation, then persist it
-business_id = f"{customer_id}_{uuid.uuid4().hex}"
+transaction_id = f"{customer_id}_{uuid.uuid4().hex}"
 # e.g. "user_123_a3f8c21d4e0b4a9f8c1d2e3f4a5b6c7d"
 ```
 
 **Rules:**
 
-- **Generate once and store** — create the UUID before calling `freeze()`, save it to your database, and reuse the same value on retries
+- **Generate once and store** — create the UUID before calling `freeze()` or `deduct()`, save it to your database, and reuse the same value on retries
 - **Never regenerate at the call site** — calling `uuid.uuid4()` inside `freeze()` produces a different ID on every attempt, breaking idempotency
-- **Unique within your project** — two different billing operations must not share the same `business_id`
+- **Unique within your project** — two different billing operations must not share the same `transaction_id`
 
 ```python
 # Wrong — new UUID on every call, idempotency broken on retry
 vb.billing.freeze(
     customer_id=customer_id,
     amount=50,
-    business_id=f"{customer_id}_{uuid.uuid4().hex}",  # ❌ regenerated each time
+    transaction_id=f"{customer_id}_{uuid.uuid4().hex}",  # ❌ regenerated each time
 )
 
 # Correct — UUID generated once and persisted before calling freeze
-business_id = db.get_or_create_business_id(operation_id, customer_id)
-# e.g. db.get_or_create_business_id returns an existing ID or
+transaction_id = db.get_or_create_transaction_id(operation_id, customer_id)
+# e.g. db.get_or_create_transaction_id returns an existing ID or
 #      stores f"{customer_id}_{uuid.uuid4().hex}" on first call
 
-vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
-# Safe to retry — same business_id returns the original result
-vb.billing.freeze(customer_id=customer_id, amount=50, business_id=business_id)
+vb.billing.freeze(customer_id=customer_id, amount=50, transaction_id=transaction_id)
+# Safe to retry — same transaction_id returns the original result
+vb.billing.freeze(customer_id=customer_id, amount=50, transaction_id=transaction_id)
 ```
 
 ## business_type
 
-`business_type` is an optional parameter on `freeze()` that categorises the billing operation for analytics and reconciliation. The SDK validates the value client-side and raises `ValueError` before sending any network request.
+`business_type` is an optional parameter on `freeze()` and `deduct()` that categorises the billing operation for analytics and reconciliation. The SDK validates the value client-side and raises `ValueError` before sending any network request.
 
 **Accepted values:**
 
@@ -309,14 +381,14 @@ vb = Velobase(api_key="vb_live_xxx")
 vb.billing.freeze(
     customer_id="user_123",
     amount=50,
-    business_id="job_abc",
+    transaction_id="job_abc",
     business_type="TASK",         # ✅ IDE autocomplete + client-side validation
 )
 
 vb.billing.freeze(
     customer_id="user_123",
     amount=50,
-    business_id="job_abc",
+    transaction_id="job_abc",
     business_type="INVALID_VAL",  # ❌ raises ValueError before making a network call
 )
 ```
@@ -332,7 +404,7 @@ try:
     vb.billing.freeze(
         customer_id="user_123",
         amount=999999,
-        business_id="job_xyz",
+        transaction_id="job_xyz",
     )
 except ValidationError as e:
     # 400 — bad request or insufficient balance
