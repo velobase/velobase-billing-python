@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from .._http import AsyncHttpClient, SyncHttpClient
-from .._types import CustomerResponse, DepositResponse
+from .._types import CustomerResponse, DepositResponse, LedgerResponse
 
 
 class CustomersResource:
@@ -61,6 +61,32 @@ class CustomersResource:
         )
         return CustomerResponse.model_validate(data)
 
+    def ledger(
+        self,
+        customer_id: str,
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        transaction_id: Optional[str] = None,
+    ) -> LedgerResponse:
+        params: Dict[str, str] = {}
+        if limit is not None:
+            params["limit"] = str(limit)
+        if cursor is not None:
+            params["cursor"] = cursor
+        if operation_type is not None:
+            params["operation_type"] = operation_type
+        if transaction_id is not None:
+            params["transaction_id"] = transaction_id
+
+        path = f"/v1/customers/{quote(customer_id, safe='')}/ledger"
+        if params:
+            path += "?" + urlencode(params)
+
+        data = self._http.request("GET", path)
+        return LedgerResponse.model_validate(data)
+
 
 class AsyncCustomersResource:
     def __init__(self, http: AsyncHttpClient) -> None:
@@ -115,3 +141,29 @@ class AsyncCustomersResource:
             "GET", f"/v1/customers/{quote(customer_id, safe='')}"
         )
         return CustomerResponse.model_validate(data)
+
+    async def ledger(
+        self,
+        customer_id: str,
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+        operation_type: Optional[str] = None,
+        transaction_id: Optional[str] = None,
+    ) -> LedgerResponse:
+        params: Dict[str, str] = {}
+        if limit is not None:
+            params["limit"] = str(limit)
+        if cursor is not None:
+            params["cursor"] = cursor
+        if operation_type is not None:
+            params["operation_type"] = operation_type
+        if transaction_id is not None:
+            params["transaction_id"] = transaction_id
+
+        path = f"/v1/customers/{quote(customer_id, safe='')}/ledger"
+        if params:
+            path += "?" + urlencode(params)
+
+        data = await self._http.request("GET", path)
+        return LedgerResponse.model_validate(data)

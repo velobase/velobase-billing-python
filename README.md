@@ -68,6 +68,7 @@ deposit -> deduct  (immediate deduction)
 3. **Consume** — After the work is done, settle the frozen amount. You can pass `actual_amount` to charge less than what was frozen; the difference is automatically returned.
 4. **Unfreeze** — If the work fails or is cancelled, release the full frozen amount back to the customer.
 5. **Deduct** — Directly deduct credits from a customer without freezing first. Useful for immediate charges. Supports `credit_types` to deduct from specific credit categories.
+6. **Ledger** — Query a customer's transaction history with filtering and cursor-based pagination.
 
 All write operations are **idempotent** — repeating the same `transaction_id` (freeze/consume/unfreeze/deduct) or `idempotency_key` (deposit) returns the original result without double-charging.
 
@@ -221,6 +222,28 @@ freeze = vb.billing.freeze(
 )
 ```
 
+### Query transaction ledger
+
+```python
+# List all ledger entries (default limit=20)
+ledger = vb.customers.ledger("user_123")
+for entry in ledger.items:
+    print(entry.operation_type, entry.amount, entry.credit_type, entry.created_at)
+
+print(f"Total: {ledger.total_count}")
+
+# Filter by operation type
+grants = vb.customers.ledger("user_123", operation_type="GRANT")
+
+# Filter by transaction_id
+txn_entries = vb.customers.ledger("user_123", transaction_id="job_abc")
+
+# Paginate with cursor
+page1 = vb.customers.ledger("user_123", limit=10)
+if page1.has_more:
+    page2 = vb.customers.ledger("user_123", limit=10, cursor=page1.next_cursor)
+```
+
 ### Customer balance structure
 
 ```python
@@ -267,6 +290,22 @@ Deposit credits. Creates the customer if they don't exist.
 Retrieve a customer's balance and account details.
 
 **Returns:** `CustomerResponse` with fields `id`, `name`, `email`, `metadata`, `balance`, `accounts`, `created_at`
+
+### `vb.customers.ledger(customer_id, ...) -> LedgerResponse`
+
+Query a customer's transaction history with filtering and cursor-based pagination.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `customer_id` | `str` | Yes | Customer identifier |
+| `limit` | `int` | No | Page size (1–100, default 20) |
+| `cursor` | `str` | No | Cursor from a previous `next_cursor` for pagination |
+| `operation_type` | `str` | No | Filter by operation type: `FREEZE`, `CONSUME`, `UNFREEZE`, `GRANT`, `EXPIRE` |
+| `transaction_id` | `str` | No | Filter by transaction ID |
+
+**Returns:** `LedgerResponse` with fields `items` (list of `LedgerEntry`), `total_count`, `has_more`, `next_cursor`
+
+Each `LedgerEntry` has: `id`, `operation_type`, `amount`, `credit_type`, `transaction_id`, `business_type`, `description`, `account_id`, `status`, `created_at`
 
 ### `vb.billing.freeze(...) -> FreezeResponse`
 

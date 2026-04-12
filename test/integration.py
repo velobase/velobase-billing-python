@@ -274,6 +274,62 @@ def main() -> None:
         ok(e.status == 400, "status=400")
         print(f'      OK: ValidationError "{e.message}"')
 
+    # ===================== 3C. LEDGER =====================
+    print("\n══════════════════════════════════")
+    print(" 3C. LEDGER")
+    print("══════════════════════════════════")
+
+    print("\n  3C.1 List all ledger entries")
+    ledger1 = vb.customers.ledger(CUSTOMER)
+    ok(isinstance(ledger1.items, list), "items is a list")
+    ok(ledger1.total_count > 0, "total_count > 0")
+    ok(isinstance(ledger1.has_more, bool), "has_more is bool")
+    print(f"      OK: total_count={ledger1.total_count} items={len(ledger1.items)}")
+
+    print("  3C.2 Verify ledger entry fields")
+    entry = ledger1.items[0]
+    ok(isinstance(entry.id, str) and len(entry.id) > 0, "has id")
+    ok(entry.operation_type in ("FREEZE", "CONSUME", "UNFREEZE", "GRANT", "EXPIRE"), "valid operation_type")
+    ok(isinstance(entry.amount, (int, float)), "amount is numeric")
+    ok(isinstance(entry.credit_type, str), "has credit_type")
+    ok(isinstance(entry.business_type, str), "has business_type")
+    ok(isinstance(entry.account_id, str), "has account_id")
+    ok(isinstance(entry.status, str), "has status")
+    ok(isinstance(entry.created_at, str), "has created_at")
+    print(f"      OK: op={entry.operation_type} amount={entry.amount} credit_type={entry.credit_type}")
+
+    print("  3C.3 Filter by operation_type=GRANT")
+    ledger2 = vb.customers.ledger(CUSTOMER, operation_type="GRANT")
+    ok(len(ledger2.items) > 0, "has GRANT entries")
+    ok(all(e.operation_type == "GRANT" for e in ledger2.items), "all entries are GRANT")
+    print(f"      OK: GRANT entries={len(ledger2.items)}")
+
+    print("  3C.4 Filter by transaction_id")
+    ledger3 = vb.customers.ledger(CUSTOMER, transaction_id=txn1)
+    ok(len(ledger3.items) > 0, "has entries for txn1")
+    ok(all(e.transaction_id == txn1 for e in ledger3.items), "all entries match txn1")
+    print(f"      OK: entries for txn1={len(ledger3.items)}")
+
+    print("  3C.5 Pagination with limit")
+    ledger4 = vb.customers.ledger(CUSTOMER, limit=2)
+    ok(len(ledger4.items) <= 2, "items <= 2")
+    if ledger4.has_more:
+        ok(ledger4.next_cursor is not None, "has next_cursor when has_more")
+        ledger5 = vb.customers.ledger(CUSTOMER, limit=2, cursor=ledger4.next_cursor)
+        ok(len(ledger5.items) > 0, "second page has items")
+        ok(ledger5.items[0].id != ledger4.items[0].id, "different items on page 2")
+        print(f"      OK: page1={len(ledger4.items)} page2={len(ledger5.items)}")
+    else:
+        print(f"      OK: all items fit in one page ({len(ledger4.items)})")
+
+    print("  3C.6 Ledger for non-existent customer → 404")
+    try:
+        vb.customers.ledger("nonexistent_ghost_user")
+        ok(False, "should throw")
+    except NotFoundError as e:
+        ok(e.status == 404, "status=404")
+        print(f'      OK: NotFoundError "{e.message}"')
+
     # ===================== 4. ERROR HANDLING =====================
     print("\n══════════════════════════════════")
     print(" 4. ERROR HANDLING")

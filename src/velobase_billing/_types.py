@@ -93,3 +93,26 @@ class CustomerResponse(BaseModel):
     balance: CustomerBalance
     accounts: List[CustomerAccount]
     created_at: str
+
+
+# ─── Ledger ──────────────────────────────────────────────────────
+
+
+class LedgerEntry(BaseModel):
+    id: str
+    operation_type: str
+    amount: float
+    credit_type: str
+    transaction_id: Optional[str] = None
+    business_type: str
+    description: Optional[str] = None
+    account_id: str
+    status: str
+    created_at: str
+
+
+class LedgerResponse(BaseModel):
+    items: List[LedgerEntry]
+    total_count: int
+    has_more: bool
+    next_cursor: Optional[str] = None

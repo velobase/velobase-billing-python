@@ -18,6 +18,8 @@ from ._types import (
     DeductResponse,
     DepositResponse,
     FreezeResponse,
+    LedgerEntry,
+    LedgerResponse,
     UnfreezeResponse,
 )
 
@@ -39,4 +41,6 @@ __all__ = [
     "CustomerBalance",
     "CustomerAccount",
     "CustomerResponse",
+    "LedgerEntry",
+    "LedgerResponse",
 ]
