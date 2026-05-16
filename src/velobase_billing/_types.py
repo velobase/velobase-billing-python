@@ -12,6 +12,10 @@ class FreezeResponse(BaseModel):
     transaction_id: str
     frozen_amount: float
     freeze_details: List[Any]
+    # Absolute ISO timestamp the scheduler will auto-unfreeze, or None.
+    unfreeze_after: Optional[str] = None
+    # Absolute ISO timestamp the scheduler will auto-consume, or None.
+    consume_after: Optional[str] = None
     is_idempotent_replay: bool
 
 
